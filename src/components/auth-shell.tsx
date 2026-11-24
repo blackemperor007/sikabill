@@ -9,7 +9,7 @@ export function AuthShell({
 }) {
     return (
         <div className="flex min-h-screen flex-col md:flex-row">
-            <section className="flex flex-1 flex-col justify-between gap-10 bg-[#1B2A41] p-10 text-white">
+            <section className="flex flex-1 flex-col justify-between gap-10 bg-[#262626] p-10 text-white">
                 <div className="flex items-center gap-2 text-2xl font-extrabold">
                     <span className="inline-block h-8 w-8 rounded-lg bg-[#E0A030]" />
                     Sikabill
