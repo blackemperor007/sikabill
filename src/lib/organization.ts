@@ -1,3 +1,4 @@
+import { cache } from 'react'
 import { createClient } from '@/lib/supabase/server'
 
 export type Organization = {
@@ -8,7 +9,9 @@ export type Organization = {
     default_tax_rate: number
 }
 
-export async function getCurrentOrganization(): Promise<Organization | null> {
+// `cache` : une seule lecture de la base par requête, même si plusieurs
+// composants (layout, page) appellent cette fonction
+export const getCurrentOrganization = cache(async (): Promise<Organization | null> => {
     const supabase = await createClient()
     const { data, error } = await supabase
         .from('organizations')
@@ -22,4 +25,4 @@ export async function getCurrentOrganization(): Promise<Organization | null> {
     if (error) throw new Error('Lecture de l’organisation impossible : ' + error.message)
 
     return data
-}
+})
