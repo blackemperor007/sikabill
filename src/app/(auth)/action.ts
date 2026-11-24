@@ -5,6 +5,9 @@ import { createClient } from '@/lib/supabase/server'
 
 export type FormState = { error?: string }
 
+const GENERIC_ERROR = 'Une erreur est survenue. Réessayez.'
+const NETWORK_ERROR = 'Impossible de joindre le serveur. Vérifiez votre connexion et réessayez.'
+
 function toFrench(message: string): string {
     const m = message.toLowerCase()
     if (m.includes('already registered') || m.includes('already been registered'))
@@ -14,8 +17,7 @@ function toFrench(message: string): string {
     if (m.includes('invalid') && m.includes('email')) return 'Adresse e-mail invalide.'
     if (m.includes('rate limit') || m.includes('too many'))
         return 'Trop de tentatives. Réessayez dans quelques minutes.'
-    // TEMPORAIRE (débogage) : affiche le message d'origine
-    return 'Erreur : ' + message
+    return GENERIC_ERROR
 }
 
 export async function signUp(_prev: FormState, formData: FormData): Promise<FormState> {
@@ -26,13 +28,6 @@ export async function signUp(_prev: FormState, formData: FormData): Promise<Form
     if (!name) return { error: 'Indiquez votre nom.' }
     if (password.length < 8) return { error: 'Le mot de passe doit contenir au moins 8 caractères.' }
 
-    // TEMPORAIRE (débogage) : vérifie seulement que les variables existent,
-    // sans jamais afficher leur valeur
-    console.log('SIGNUP env →', {
-        urlDefinie: Boolean(process.env.NEXT_PUBLIC_SUPABASE_URL),
-        cleDefinie: Boolean(process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY),
-    })
-
     try {
         const supabase = await createClient()
         const { error } = await supabase.auth.signUp({
@@ -40,20 +35,10 @@ export async function signUp(_prev: FormState, formData: FormData): Promise<Form
             password,
             options: { data: { full_name: name } },
         })
-        if (error) {
-            // TEMPORAIRE (débogage)
-            console.error('SIGNUP ERROR →', {
-                name: error.name,
-                status: error.status,
-                code: (error as { code?: string }).code,
-                message: error.message,
-            })
-            return { error: toFrench(error.message) }
-        }
+        if (error) return { error: toFrench(error.message) }
     } catch (e) {
-        // TEMPORAIRE (débogage)
-        console.error('SIGNUP EXCEPTION →', e)
-        return { error: 'Erreur : ' + (e instanceof Error ? e.message : String(e)) }
+        console.error('Inscription impossible :', e)
+        return { error: NETWORK_ERROR }
     }
 
     // Le redirect reste hors du try : il fonctionne en lançant une exception interne
@@ -67,20 +52,10 @@ export async function signIn(_prev: FormState, formData: FormData): Promise<Form
     try {
         const supabase = await createClient()
         const { error } = await supabase.auth.signInWithPassword({ email, password })
-        if (error) {
-            // TEMPORAIRE (débogage)
-            console.error('SIGNIN ERROR →', {
-                name: error.name,
-                status: error.status,
-                code: (error as { code?: string }).code,
-                message: error.message,
-            })
-            return { error: toFrench(error.message) }
-        }
+        if (error) return { error: toFrench(error.message) }
     } catch (e) {
-        // TEMPORAIRE (débogage)
-        console.error('SIGNIN EXCEPTION →', e)
-        return { error: 'Erreur : ' + (e instanceof Error ? e.message : String(e)) }
+        console.error('Connexion impossible :', e)
+        return { error: NETWORK_ERROR }
     }
 
     redirect('/dashboard')
