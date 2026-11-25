@@ -1,17 +1,291 @@
+import Link from 'next/link'
+import { createClient } from '@/lib/supabase/server'
 import { getCurrentOrganization } from '@/lib/organization'
+import { currencyDigits, formatMoney } from '@/lib/money'
+import { daysBetween, displayStatus, todayISO } from '@/lib/invoices'
+import { StatusBadge } from '@/components/status-badge'
+
+const plural = (n: number) => (n > 1 ? 's' : '')
+const capitalize = (s: string) => s.charAt(0).toUpperCase() + s.slice(1)
 
 export default async function DashboardPage() {
     const org = await getCurrentOrganization()
+    if (!org) return null // la mise en page redirige déjà vers /onboarding
+
+    const supabase = await createClient()
+    const { data: claimsData } = await supabase.auth.getClaims()
+    const fullName = (claimsData?.claims?.user_metadata as { full_name?: unknown } | undefined)
+        ?.full_name
+    const firstName = typeof fullName === 'string' ? fullName.trim().split(/\s+/)[0] : ''
+
+    const digits = currencyDigits(org.currency)
+    const money = (n: number) => formatMoney(n, org.currency)
+    const now = new Date()
+    const today = todayISO()
+    const chartStart = new Date(now.getFullYear(), now.getMonth() - 5, 1)
+
+    const [paidRes, issuedRes, recentRes, countRes] = await Promise.all([
+        supabase
+            .from('invoices')
+            .select('paid_at, total')
+            .eq('organization_id', org.id)
+            .eq('status', 'paid')
+            .gte('paid_at', chartStart.toISOString()),
+        supabase
+            .from('invoices')
+            .select('id, number, customer_id, due_date, status, total')
+            .eq('organization_id', org.id)
+            .eq('status', 'issued'),
+        supabase
+            .from('invoices')
+            .select('id, number, status, customer_id, due_date, total')
+            .eq('organization_id', org.id)
+            .order('created_at', { ascending: false })
+            .limit(5),
+        supabase
+            .from('invoices')
+            .select('id', { count: 'exact', head: true })
+            .eq('organization_id', org.id),
+    ])
+    if (paidRes.error || issuedRes.error || recentRes.error || countRes.error) {
+        throw new Error('Lecture du tableau de bord impossible')
+    }
+
+    // Encaissé : six mois glissants, le dernier est le mois courant
+    const months = Array.from({ length: 6 }, (_, i) => {
+        const d = new Date(now.getFullYear(), now.getMonth() - 5 + i, 1)
+        return {
+            key: `${d.getFullYear()}-${d.getMonth()}`,
+            label: capitalize(new Intl.DateTimeFormat('fr-FR', { month: 'short' }).format(d)),
+            total: 0,
+            current: i === 5,
+        }
+    })
+    for (const p of paidRes.data ?? []) {
+        if (!p.paid_at) continue
+        const d = new Date(p.paid_at)
+        const m = months.find((x) => x.key === `${d.getFullYear()}-${d.getMonth()}`)
+        if (m) m.total += Number(p.total)
+    }
+    const collected = months[5].total
+
+    // En attente (dans les délais) et en retard
+    let pending = 0
+    let late = 0
+    const overdue: { id: string; number: string | null; customer_id: string; due_date: string; total: number }[] = []
+    for (const inv of issuedRes.data ?? []) {
+        if (displayStatus(inv, today) === 'overdue' && inv.due_date) {
+            late += Number(inv.total)
+            overdue.push({
+                id: inv.id,
+                number: inv.number,
+                customer_id: inv.customer_id,
+                due_date: inv.due_date,
+                total: Number(inv.total),
+            })
+        } else {
+            pending += Number(inv.total)
+        }
+    }
+    overdue.sort((a, b) => (a.due_date < b.due_date ? -1 : 1))
+    const toChase = overdue.slice(0, 3)
+    const recent = recentRes.data ?? []
+
+    // Noms des clients, en une seule requête
+    const ids = Array.from(new Set([...toChase.map((o) => o.customer_id), ...recent.map((r) => r.customer_id)]))
+    const names = new Map<string, string>()
+    if (ids.length > 0) {
+        const { data, error } = await supabase
+            .from('customers')
+            .select('id, name')
+            .eq('organization_id', org.id)
+            .in('id', ids)
+        if (error) throw new Error('Lecture des clients impossible')
+        for (const c of data ?? []) names.set(c.id, c.name)
+    }
+
+    // Aide au démarrage : seulement tant qu'il n'y a aucune facture
+    const noInvoices = (countRes.count ?? 0) === 0
+    let setupDone = false
+    let hasCustomer = false
+    if (noInvoices) {
+        const [setupRes, custRes] = await Promise.all([
+            supabase
+                .from('organizations')
+                .select('tax_id, registration_number, address')
+                .eq('id', org.id)
+                .single(),
+            supabase
+                .from('customers')
+                .select('id', { count: 'exact', head: true })
+                .eq('organization_id', org.id)
+                .is('archived_at', null),
+        ])
+        if (setupRes.error || custRes.error) throw new Error('Lecture de la configuration impossible')
+        const s = setupRes.data
+        setupDone = Boolean(s?.tax_id?.trim() && s?.registration_number?.trim() && s?.address?.trim())
+        hasCustomer = (custRes.count ?? 0) > 0
+    }
+
+    // Graphique
+    const compact = new Intl.NumberFormat('fr-FR', { notation: 'compact', maximumFractionDigits: 1 })
+    const barLabel = (minor: number) => (minor === 0 ? '0' : compact.format(minor / 10 ** digits))
+    const maxTotal = Math.max(...months.map((m) => m.total), 1)
+
+    const steps = [
+        { done: setupDone, label: 'Complétez les informations de votre entreprise (NIU, RCCM, adresse)', href: '/settings', cta: 'Ouvrir les paramètres' },
+        { done: hasCustomer, label: 'Ajoutez votre premier client', href: '/customers/new', cta: 'Ajouter un client' },
+        { done: false, label: 'Créez votre première facture', href: '/invoices/new', cta: 'Créer une facture' },
+    ]
 
     return (
         <>
-            <h1 className="text-3xl font-extrabold">Tableau de bord</h1>
-            <p className="mt-2 text-gray-600">
-                {org?.name} · Devise : {org?.currency} · TVA par défaut : {org?.default_tax_rate} %
-            </p>
-            <p className="mt-6 text-sm text-gray-600">
-                Le tableau de bord complet sera construit à la fin de l’étape 6.
-            </p>
+            <div className="mb-6">
+                <h1 className="text-3xl font-extrabold">{firstName ? `Bonjour ${firstName}` : 'Bonjour'}</h1>
+                <p className="mt-1 text-sm text-gray-600">Voici où en sont vos factures aujourd’hui.</p>
+            </div>
+
+            {noInvoices && (
+                <section className="mb-6 rounded-[14px] border border-gray-200 bg-white p-5">
+                    <h2 className="text-base font-bold">Pour bien démarrer</h2>
+                    <p className="mb-3 mt-1 text-[13px] text-gray-600">
+                        Trois étapes pour envoyer votre première facture.
+                    </p>
+                    <ol className="space-y-2.5">
+                        {steps.map((s, i) => (
+                            <li key={s.href} className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm">
+                                <span
+                                    className={`inline-flex h-6 min-w-6 items-center justify-center rounded-full px-1.5 text-xs font-bold ${s.done ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-600'
+                                        }`}
+                                >
+                                    {s.done ? 'Fait' : i + 1}
+                                </span>
+                                <span className={s.done ? 'text-gray-500 line-through' : 'font-medium'}>{s.label}</span>
+                                {!s.done && (
+                                    <Link href={s.href} className="font-semibold underline">
+                                        {s.cta}
+                                    </Link>
+                                )}
+                            </li>
+                        ))}
+                    </ol>
+                </section>
+            )}
+
+            <div className="mb-6 grid gap-4 sm:grid-cols-3">
+                <div className="rounded-[14px] border border-gray-200 bg-white p-[18px]">
+                    <div className="text-[13px] text-gray-600">Encaissé ce mois</div>
+                    <div className="mt-1.5 text-2xl font-extrabold">{money(collected)}</div>
+                </div>
+                <div className="rounded-[14px] border border-gray-200 bg-white p-[18px]">
+                    <div className="text-[13px] text-gray-600">En attente de paiement</div>
+                    <div className="mt-1.5 text-2xl font-extrabold">{money(pending)}</div>
+                </div>
+                <div className="rounded-[14px] border border-gray-200 bg-white p-[18px]">
+                    <div className="text-[13px] font-semibold text-red-700">En retard</div>
+                    <div className="mt-1.5 text-2xl font-extrabold">{money(late)}</div>
+                </div>
+            </div>
+
+            <div className="mb-6 flex flex-wrap items-stretch gap-6">
+                <section className="min-w-0 flex-[2_1_520px] rounded-[14px] border border-gray-200 bg-white p-5">
+                    <h2 className="text-base font-bold">Encaissé sur 6 mois</h2>
+                    <p className="mb-4 mt-1 text-[13px] text-gray-600">
+                        Par mois, en {org.currency} (k = milliers, M = millions)
+                    </p>
+                    <div className="flex h-[200px] items-end gap-3">
+                        {months.map((m) => (
+                            <div key={m.key} className="flex min-w-0 flex-1 flex-col items-center justify-end gap-1.5">
+                                <span className="text-xs tabular-nums text-gray-600">{barLabel(m.total)}</span>
+                                <div
+                                    className={`w-full max-w-14 rounded-t-lg ${m.total === 0 ? 'bg-gray-200' : m.current ? 'bg-[#E0A030]' : 'bg-[#1B2A41]'
+                                        }`}
+                                    style={{ height: m.total === 0 ? 2 : Math.max(6, Math.round((m.total / maxTotal) * 150)) }}
+                                />
+                                <span className={`text-xs ${m.current ? 'font-semibold' : ''}`}>{m.label}</span>
+                            </div>
+                        ))}
+                    </div>
+                </section>
+
+                <section className="min-w-0 flex-[1_1_300px] rounded-[14px] border border-gray-200 bg-white p-5">
+                    <h2 className="text-base font-bold">À relancer</h2>
+                    <p className="mb-3 mt-1 text-[13px] text-gray-600">Factures dont l’échéance est dépassée</p>
+                    {toChase.length === 0 ? (
+                        <p className="border-t border-gray-100 pt-4 text-sm text-gray-600">
+                            Aucune facture en retard. Bravo, tout est à jour.
+                        </p>
+                    ) : (
+                        <>
+                            {toChase.map((o) => {
+                                const days = daysBetween(o.due_date, today)
+                                return (
+                                    <div key={o.id} className="border-t border-gray-100 py-3.5">
+                                        <b className="text-sm">
+                                            {o.number ?? 'Sans numéro'} · {names.get(o.customer_id) ?? '—'}
+                                        </b>
+                                        <div className="mb-2.5 mt-0.5 text-[13px] text-red-700">
+                                            {days} jour{plural(days)} de retard · {money(o.total)}
+                                        </div>
+                                        <Link
+                                            href={`/invoices/${o.id}`}
+                                            className="inline-flex min-h-[44px] items-center rounded-[10px] border border-gray-300 bg-white px-4 text-sm font-semibold"
+                                        >
+                                            Voir la facture
+                                        </Link>
+                                    </div>
+                                )
+                            })}
+                            {overdue.length > toChase.length && (
+                                <Link
+                                    href="/invoices?status=overdue"
+                                    className="mt-1 inline-block text-[13px] font-semibold underline"
+                                >
+                                    Voir les {overdue.length - toChase.length} autre{plural(overdue.length - toChase.length)}
+                                </Link>
+                            )}
+                        </>
+                    )}
+                </section>
+            </div>
+
+            <section className="rounded-[14px] border border-gray-200 bg-white p-5">
+                <div className="mb-1 flex items-center justify-between">
+                    <h2 className="text-base font-bold">Dernières factures</h2>
+                    <Link href="/invoices" className="text-sm font-semibold underline">
+                        Tout voir
+                    </Link>
+                </div>
+                {recent.length === 0 ? (
+                    <p className="border-t border-gray-100 pt-4 text-sm text-gray-600">
+                        Vos factures apparaîtront ici.
+                    </p>
+                ) : (
+                    recent.map((r) => {
+                        const ds = displayStatus(r, today)
+                        const total = Number(r.total)
+                        return (
+                            <div
+                                key={r.id}
+                                className="flex flex-wrap items-center justify-between gap-3 border-t border-gray-100 py-3.5"
+                            >
+                                <div>
+                                    <Link href={`/invoices/${r.id}`} className="text-sm font-bold underline-offset-2 hover:underline">
+                                        {r.number ?? 'Sans numéro'}
+                                    </Link>
+                                    <div className="text-[13px] text-gray-600">{names.get(r.customer_id) ?? '—'}</div>
+                                </div>
+                                <div className="flex items-center gap-3">
+                                    <StatusBadge status={ds} />
+                                    <b className="text-sm tabular-nums">
+                                        {ds === 'draft' && total === 0 ? '—' : money(total)}
+                                    </b>
+                                </div>
+                            </div>
+                        )
+                    })
+                )}
+            </section>
         </>
     )
 }
