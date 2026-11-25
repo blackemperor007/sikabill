@@ -1,6 +1,7 @@
 import { createClient } from '@/lib/supabase/server'
 import { getCurrentOrganization } from '@/lib/organization'
 import { SettingsForm } from './settings-form'
+import { LogoCard } from './logo-card'
 
 function joinFrench(items: string[]) {
     if (items.length <= 1) return items.join('')
@@ -16,7 +17,7 @@ export default async function SettingsPage() {
         supabase
             .from('organizations')
             .select(
-                'name, legal_name, address, phone, email, tax_id, registration_number, country, currency, default_tax_rate, payment_terms_days, invoice_prefix, next_invoice_number, payment_instructions'
+                'name, legal_name, address, phone, email, tax_id, registration_number, country, currency, default_tax_rate, payment_terms_days, invoice_prefix, next_invoice_number, payment_instructions, logo_url'
             )
             .eq('id', current.id)
             .single(),
@@ -48,6 +49,8 @@ export default async function SettingsPage() {
                     votre première facture.
                 </div>
             )}
+
+            <LogoCard logoUrl={o.logo_url ?? null} orgName={o.name} />
 
             <SettingsForm
                 initial={{
