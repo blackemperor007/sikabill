@@ -2,9 +2,9 @@
 
 import { useActionState, useMemo, useState } from 'react'
 import Link from 'next/link'
+import { saveInvoice, type InvoiceState } from './actions'
+import { computeTotals, type LineInput } from '@/lib/invoice-math'
 import { formatMoney } from '@/lib/money'
-import { computeTotals, LineInput } from '@/lib/invoice-math'
-import { InvoiceState, saveInvoice } from './actions'
 
 type Line = LineInput & { key: number }
 
@@ -39,6 +39,10 @@ export function InvoiceForm({ invoiceId, currency, digits, customers, initial }:
     )
     const [nextKey, setNextKey] = useState(initial.lines.length)
 
+    // Si un brouillon a été enregistré avant un échec d'émission, on continue à le mettre à jour
+    // plutôt que d'en créer un second
+    const currentId = invoiceId ?? state.savedId
+
     const totals = useMemo(() => computeTotals(lines, digits), [lines, digits])
     const money = (n: bigint) => formatMoney(Number(n), currency)
 
@@ -60,7 +64,7 @@ export function InvoiceForm({ invoiceId, currency, digits, customers, initial }:
 
     return (
         <form action={action} className="flex flex-wrap items-start gap-6">
-            {invoiceId && <input type="hidden" name="id" value={invoiceId} />}
+            {currentId && <input type="hidden" name="id" value={currentId} />}
             <input
                 type="hidden"
                 name="lines"
@@ -241,22 +245,52 @@ export function InvoiceForm({ invoiceId, currency, digits, customers, initial }:
                 )}
 
                 {state.error && (
-                    <p role="alert" className="mt-4 text-sm font-medium text-red-700">{state.error}</p>
+                    <p role="alert" className="mt-4 text-sm font-medium text-red-700">
+                        {state.error}{' '}
+                        {state.needsSettings && (
+                            <Link href="/settings" className="font-semibold underline">
+                                Ouvrir les paramètres
+                            </Link>
+                        )}
+                    </p>
                 )}
 
-                <button
-                    type="submit"
-                    disabled={pending}
-                    className="mt-5 min-h-[48px] w-full rounded-[10px] bg-[#E0A030] font-bold text-[#1B2A41] disabled:opacity-60"
-                >
-                    {pending ? 'Enregistrement…' : 'Enregistrer le brouillon'}
-                </button>
-                <Link
-                    href="/invoices"
-                    className="mt-2.5 flex min-h-[48px] w-full items-center justify-center rounded-[10px] border border-gray-300 bg-white font-semibold"
-                >
-                    Annuler
-                </Link>
+                <div className="mt-5 flex flex-col gap-2.5">
+                    {/* « Enregistrer » est placé en premier dans le code : c'est lui que la touche Entrée
+              déclenche. L'émission, irréversible, exige un clic volontaire. */}
+                    <button
+                        type="submit"
+                        name="intent"
+                        value="save"
+                        disabled={pending}
+                        className="order-2 min-h-[48px] w-full rounded-[10px] border border-gray-300 bg-white font-semibold disabled:opacity-60"
+                    >
+                        {pending ? 'Patientez…' : 'Enregistrer le brouillon'}
+                    </button>
+                    <button
+                        type="submit"
+                        name="intent"
+                        value="issue"
+                        disabled={pending}
+                        onClick={(e) => {
+                            if (
+                                !confirm(
+                                    'Émettre cette facture ? Un numéro lui sera attribué et elle ne pourra plus être modifiée.'
+                                )
+                            )
+                                e.preventDefault()
+                        }}
+                        className="order-1 min-h-[48px] w-full rounded-[10px] bg-[#E0A030] font-bold text-[#1B2A41] disabled:opacity-60"
+                    >
+                        {pending ? 'Patientez…' : 'Émettre la facture'}
+                    </button>
+                    <Link
+                        href="/invoices"
+                        className="order-3 flex min-h-[48px] w-full items-center justify-center rounded-[10px] border border-gray-300 bg-white font-semibold"
+                    >
+                        Annuler
+                    </Link>
+                </div>
 
                 <p className="mt-4 text-[13px] leading-relaxed text-gray-600">
                     Le numéro est attribué à l’émission. Une fois émise, la facture ne peut plus être
