@@ -180,14 +180,12 @@ export default async function InvoicePage({ params }: { params: Promise<{ id: st
                     <StatusBadge status={ds} />
                 </div>
                 <div className="flex flex-wrap items-start gap-2.5">
-                    <button
-                        type="button"
-                        disabled
-                        title="Disponible à l’étape suivante"
-                        className="min-h-[44px] rounded-[10px] border border-gray-300 bg-white px-[18px] text-sm font-semibold opacity-50"
+                    <a
+                        href={`/invoices/${inv.id}/pdf`}
+                        className="inline-flex min-h-[44px] items-center rounded-[10px] border border-gray-300 bg-white px-[18px] text-sm font-semibold"
                     >
                         Télécharger le PDF
-                    </button>
+                    </a>
                     {inv.status === 'issued' && <PayButton id={inv.id} />}
                 </div>
             </div>
