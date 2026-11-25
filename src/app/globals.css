@@ -1,26 +1,42 @@
 @import "tailwindcss";
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
-
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  /* Identité Sikabill */
+  --color-brand: #ff6b00;
+  --color-ink: #262626;
+  --color-paper: #ffffff;
+  --color-mist: #f4f4f4;
+  --color-canvas: #eeeef0;
+  --color-muted: #595959;
+
+  /* Pastilles de statut : fond clair + texte foncé (jamais la couleur seule) */
+  --color-ok: #14532d;
+  --color-ok-soft: #dcf3e3;
+  --color-warn: #7a2e00;
+  --color-warn-soft: #ffe3cf;
+  --color-bad: #8f1d1d;
+  --color-bad-soft: #fde0e0;
+
+  --font-sans: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+  --font-display: var(--font-space-grotesk), ui-sans-serif, system-ui, sans-serif;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+@layer base {
+
+  h1,
+  h2,
+  h3 {
+    font-family: var(--font-space-grotesk), ui-sans-serif, system-ui, sans-serif;
   }
-}
 
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  /* Contour de focus visible au clavier */
+  :focus-visible {
+    outline: 3px solid #262626;
+    outline-offset: 2px;
+  }
+
+  /* Sur fond anthracite (menu latéral), le contour passe en blanc */
+  .dark-zone :focus-visible {
+    outline-color: #ffffff;
+  }
 }
