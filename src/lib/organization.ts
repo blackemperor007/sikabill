@@ -7,6 +7,7 @@ export type Organization = {
     country: string
     currency: string
     default_tax_rate: number
+    payment_terms_days: number
 }
 
 // `cache` : une seule lecture de la base par requête, même si plusieurs
@@ -15,7 +16,7 @@ export const getCurrentOrganization = cache(async (): Promise<Organization | nul
     const supabase = await createClient()
     const { data, error } = await supabase
         .from('organizations')
-        .select('id, name, country, currency, default_tax_rate')
+        .select('id, name, country, currency, default_tax_rate, payment_terms_days')
         .order('created_at', { ascending: true })
         .limit(1)
         .maybeSingle()
