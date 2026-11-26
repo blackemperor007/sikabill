@@ -304,9 +304,3 @@ function FeatureCard({ n, label, title, bg, children }: { n: string; label: stri
     </div>
   )
 }
-
-// import { redirect } from 'next/navigation'
-
-// export default function Home() {
-//   redirect('/dashboard')
-// }
