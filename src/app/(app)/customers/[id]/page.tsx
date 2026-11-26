@@ -8,9 +8,9 @@ import { initials, plural, shortDate, shortTimestamp } from '@/lib/format'
 import { isUuid } from '@/lib/validators'
 import { btn, cardClass } from '@/lib/ui'
 import { StatusBadge, type DisplayStatus } from '@/components/status-badge'
-import { IconDoc } from '@/components/icons'
 import { CustomerForm } from '../customer-form'
-import { setCustomerArchived } from '../actions'
+import { setCustomerArchived } from '../action'
+import { IconDoc } from '@/components/icon'
 
 export default async function CustomerPage({ params }: { params: Promise<{ id: string }> }) {
     const { id } = await params
